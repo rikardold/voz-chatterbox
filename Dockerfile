@@ -13,7 +13,7 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/modelos \
     DISPOSITIVO=cuda \
     IDIOMA_PADRAO=pt \
-    T3_MODEL=v3
+    T3_MODEL=""
 
 # O ffmpeg é para a AMOSTRA DE VOZ. Ela pode chegar em webm/mp4 (gravação de navegador) e o modelo só
 # lê wav; sem ele, clonar a voz do apresentador falharia com a amostra real.
@@ -31,11 +31,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # qual combinação foi construída — sem elas o log não conta o que foi testado.
 RUN python -c "import torch, torchaudio, torchvision; from transformers import LlamaModel; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__, '| torchvision', torchvision.__version__, '| llama ok')"
 
-# Os pesos ficam DENTRO da imagem de propósito: baixá-los no primeiro trabalho faria cada worker novo
-# gastar minutos de GPU (e de dinheiro) antes de falar a primeira palavra. Se este comando estiver
-# errado, o build falha aqui — que é o lugar certo para descobrir.
-RUN python -c "from chatterbox.mtl_tts import ChatterboxMultilingualTTS as M; M.from_pretrained(device='cpu', t3_model='v3')"
+# Qual versão da biblioteca veio, e QUAIS parâmetros ela aceita. Sem isto, um argumento a mais
+# derruba o build com uma mensagem que não diz de que versão se trata — foi a segunda falha:
+# `t3_model` existe no repositório oficial, mas não na versão publicada no PyPI que o pip instala.
+RUN python -c "import inspect, importlib.metadata as md; from chatterbox.mtl_tts import ChatterboxMultilingualTTS as M; print('chatterbox-tts', md.version('chatterbox-tts')); print('from_pretrained', inspect.signature(M.from_pretrained))"
 
 COPY handler.py teste.py ./
+
+# Os pesos ficam DENTRO da imagem de propósito: baixá-los no primeiro trabalho faria cada worker novo
+# gastar minutos de GPU (e de dinheiro) antes de falar a primeira palavra. O carregamento passa pelo
+# MESMO caminho de código do worker (`handler.modelo()`) e não por uma chamada paralela aqui: assim o
+# build não pode testar uma coisa e o endpoint rodar outra.
+RUN DISPOSITIVO=cpu python -c "import handler; handler.modelo(); print('pesos prontos')"
 
 CMD ["python", "-u", "handler.py"]

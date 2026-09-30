@@ -50,7 +50,14 @@ from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
 DISPOSITIVO = os.environ.get("DISPOSITIVO", "cuda")
 IDIOMA_PADRAO = os.environ.get("IDIOMA_PADRAO", "pt")
-T3_MODEL = os.environ.get("T3_MODEL", "v3")
+
+# Vazio = usa o padrão da biblioteca instalada. Não é preguiça: o `from_pretrained` da versão que o
+# pip instala (PyPI) **não aceita** `t3_model` — o parâmetro só existe no código do repositório
+# oficial, que é mais novo que o publicado. Passá-lo fixo derrubou o build:
+#     TypeError: ChatterboxMultilingualTTS.from_pretrained() got an unexpected keyword argument 't3_model'
+# Opcional, a mesma imagem funciona nas duas versões — e subir para o V3 vira variável de ambiente,
+# não mudança de código.
+T3_MODEL = os.environ.get("T3_MODEL", "").strip()
 
 _modelo = None
 
@@ -65,7 +72,11 @@ def modelo():
     global _modelo
 
     if _modelo is None:
-        _modelo = ChatterboxMultilingualTTS.from_pretrained(device=DISPOSITIVO, t3_model=T3_MODEL)
+        # O `t3_model` só vai quando alguém pede: assim a chamada padrão usa exatamente a assinatura
+        # que a biblioteca instalada oferece.
+        extras = {"t3_model": T3_MODEL} if T3_MODEL else {}
+
+        _modelo = ChatterboxMultilingualTTS.from_pretrained(device=DISPOSITIVO, **extras)
 
     return _modelo
 
