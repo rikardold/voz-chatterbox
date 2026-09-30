@@ -9,7 +9,11 @@ antes de existir endpoint — em vez de virar trabalho parado em fila na madruga
 import os
 
 # Precisa vir ANTES de importar o handler: o dispositivo é lido no import.
-os.environ.setdefault("DISPOSITIVO", "cpu")
+#
+# ATRIBUIÇÃO, e não `setdefault`: a imagem declara `ENV DISPOSITIVO=cuda`, então o setdefault não
+# fazia nada — o teste tentava CUDA e morria com "Found no NVIDIA driver on your system" num runner
+# sem GPU. O teste de fumaça existe para rodar SEM GPU: ele precisa dizer isso, não sugerir.
+os.environ["DISPOSITIVO"] = "cpu"
 
 import handler  # noqa: E402
 
