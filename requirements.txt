@@ -1,0 +1,11 @@
+# O modelo oficial (Resemble AI). Traz o Chatterbox Multilingual, que cobre português.
+chatterbox-tts
+
+# O SDK do RunPod fica sem versão fixa DE PROPÓSITO, mas por um motivo específico: aqui usamos
+# apenas `runpod.serverless.start`. Nenhum utilitário interno — foi um deles (`upload_output`) que
+# quebrou o worker que tentamos antes. Sem depender de helper, a versão do SDK não decide se o
+# worker sobe.
+runpod
+
+# Escrita do wav em memória (o áudio sai como base64 na resposta, sem passar por disco).
+soundfile
