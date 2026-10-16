@@ -3,7 +3,13 @@ name: imagem
 on:
   push:
     branches: [main]
+  # Permite publicar uma etiqueta de TESTE de qualquer branch, sem mexer no :latest que a producao usa.
   workflow_dispatch:
+    inputs:
+      etiqueta:
+        description: "Etiqueta da imagem (ex.: teste). O :latest so sai do push na main."
+        required: false
+        default: teste
 
 jobs:
   construir:
@@ -28,13 +34,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A ETIQUETA: `latest` só sai de push na main. Rodando à mão, sai a etiqueta pedida (padrão
+      # `teste`) — e a produção continua no :latest que ela já usa.
+      #
+      # O motivo: o endpoint do Runpod aponta para `:latest`, então publicar por engano uma correção
+      # ainda não ouvida trocaria a voz em produção sem janela de teste. Publicar `:teste` permite
+      # apontar um endpoint de laboratório para ela e comparar COM O OUVIDO antes de promover.
+      - name: etiqueta
+        id: etiqueta
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "valor=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "valor=${{ inputs.etiqueta }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/${{ github.repository }}:${{ steps.etiqueta.outputs.valor }}
 
       # A fumaça roda A IMAGEM QUE ACABOU DE SER CONSTRUÍDA, em CPU. É a diferença entre "a imagem
       # construiu" e "o worker fala": o card do Hub construía e morria no import do handler.
-      - name: fumaça (o worker fala?)
-        run: docker run --rm ghcr.io/${{ github.repository }}:latest python teste.py
+      #
+      # Desde 16/10 ela também roda o fatiamento do texto longo — a lógica pura que impede o áudio de
+      # cortar em 40 s. Fatiamento errado com voz bonita ainda entrega fala pela metade.
+      - name: fumaça (o worker fala? o texto longo é fatiado?)
+        run: docker run --rm ghcr.io/${{ github.repository }}:${{ steps.etiqueta.outputs.valor }} python teste.py
