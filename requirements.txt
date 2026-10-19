@@ -26,8 +26,10 @@
 ####
 
 # O modelo oficial (Resemble AI). Traz o Chatterbox Multilingual, que cobre português.
-# `--no-deps` porque o pin de torch dele é anterior à GPU Blackwell (ver o bloco acima).
-chatterbox-tts==0.1.7 --no-deps
+#
+# ⚠️ O `chatterbox-tts` NÃO está nesta lista de propósito: ele é instalado no Dockerfile com
+# `--no-deps` (uma flag de LINHA DE COMANDO, que não existe dentro de requirements.txt), e as
+# dependências dele estão listadas abaixo, à mão. Ver o bloco no topo deste arquivo.
 
 # ─── As dependências que o `--no-deps` deixou de fora (de `requires_dist` 0.1.7) ───
 # O torch NÃO está aqui de propósito: ele vem da imagem base, e é ele que suporta sm_120.

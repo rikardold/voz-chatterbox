@@ -40,10 +40,17 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt ./
-# As dependências vêm do `requirements.txt`, que instala `chatterbox-tts --no-deps` e lista à mão o
-# que ele usa. O torch NÃO é instalado aqui: ele vem da imagem base (2.8 + CUDA 12.8), e é o único
-# que tem kernel para sm_120 (Blackwell). Ver o bloco explicativo no próprio requirements.txt.
+# O torch NÃO é instalado aqui: ele vem da imagem base (2.8 + CUDA 12.8), e é o único que tem kernel
+# para sm_120 (Blackwell). Ver o bloco explicativo no próprio requirements.txt.
 RUN pip install --no-cache-dir -r requirements.txt
+
+# O `chatterbox-tts` fica numa camada própria, com `--no-deps`, porque o pin dele (`torch==2.6.0`)
+# rebaixaria o torch da base — e sem sm_120 o worker morre no boot. As dependências dele estão no
+# requirements.txt, instaladas acima; aqui entra só o pacote.
+#
+# `--no-deps` é flag de LINHA DE COMANDO: dentro de requirements.txt o pip recusa com
+# "no such option: --no-deps". Por isso esta linha separada.
+RUN pip install --no-cache-dir --no-deps chatterbox-tts==0.1.7
 
 # Conferência barata da pilha, ANTES do download pesado dos pesos: uma versão trocada pelo pip não
 # pode custar 20 minutos de build para aparecer. As versões impressas aqui são também a evidência de
