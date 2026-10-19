@@ -17,6 +17,37 @@ os.environ["DISPOSITIVO"] = "cpu"
 
 import handler  # noqa: E402
 
+"""
+─── A VERSÃO DO TORCH: o build barra o rebaixamento silencioso ────────────────
+
+Em 19/10/2026 o worker ficou 3 dias morto porque o `chatterbox-tts` pede `torch==2.6.0`, e o pip
+rebaixou o torch da imagem base. O torch 2.6 não tem kernel para a GPU **Blackwell (sm_120)** que o
+Runpod passou a alocar, e o container morria no boot:
+
+    RuntimeError: CUDA initialization failed: no kernel image is available for execution
+    Worker is unhealthy, exiting.
+
+O sintoma que chegava até o produto era "3 workers prontos, 0 rodando", fila parada — e nada executava,
+nem um job inválido. O build passava, porque em CPU o torch antigo funciona.
+
+O conserto está em `restricoes.txt` (o pip não pode trocar o torch da base). Este teste garante que a
+constraint continue valendo: se alguém a remover, ou se a base mudar de versão sem `restricoes.txt`
+acompanhar, o build fica VERMELHO aqui — onde é barato — em vez de o worker morrer na GPU.
+
+`MINIMO` é a primeira versão COM suporte a sm_120 (Blackwell). Abaixar este número é reabrir o defeito.
+"""
+import torch  # noqa: E402
+
+MINIMO_DO_TORCH = (2, 8)
+
+assert torch.__version__.startswith(f"{MINIMO_DO_TORCH[0]}.{MINIMO_DO_TORCH[1]}."), (
+    f"torch {torch.__version__} é anterior a {MINIMO_DO_TORCH[0]}.{MINIMO_DO_TORCH[1]}: sem suporte a "
+    "sm_120 (Blackwell), o worker morre no boot com 'no kernel image is available'. "
+    "Confira restricoes.txt."
+)
+
+print(f"ok · torch {torch.__version__} (>= {MINIMO_DO_TORCH[0]}.{MINIMO_DO_TORCH[1]}, suporta sm_120)")
+
 # ─── O fatiamento, sem GPU ───────────────────────────────────────────────────
 #
 # Estes testes rodam primeiro e não tocam no modelo: a divisão em frases é lógica pura, e é ela que
