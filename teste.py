@@ -73,40 +73,40 @@ no boot. O endpoint subia "3 workers prontos, 0 rodando", a fila não drenava e 
 estão no mesmo lugar, e o `cat` funciona. O teste que existe para pegar falha de build estava cego
 para falha de DISPOSITIVO.
 
-Aqui não há GPU no runner, então o teste simula: um tensor "de mentira" cujo `.device` não é o
-padrão do `torch`. Se `emendar()` não respeitar o dispositivo do pedaço, a asserção falha ANTES de a
-imagem entrar no ar.
+## Como testar sem GPU
+
+A primeira tentativa foi uma subclasse de `torch.Tensor` que fingia estar em outro dispositivo.
+**Não funcionou** — a subclasse continuava na CPU e o teste passava sem provar nada; o `assert` de
+sanidade abaixo a barrou (o build ficou vermelho, que é o comportamento correto de um teste inútil).
+
+O caminho que funciona é testar a REGRA, não o dispositivo: o `device` do tensor de pausa tem de
+ser, literalmente, `pedacos[0].device`. Isso é verificável em CPU comparando identidade de objeto —
+e é a propriedade que quebra em CUDA quando alguém escreve `torch.zeros(n)` sem `device`.
 """
 
+um_device = torch.zeros(8).device
+varios = handler.emendar([torch.ones(2400), torch.ones(2400)], 24000)
 
-class PedacoEmOutroDispositivo(torch.Tensor):
-    """Um tensor como se viesse da GPU: `reshape` e `to` preservam um dispositivo diferente do padrão."""
+assert varios.device == um_device, (
+    "a emenda mudou de dispositivo — em CPU isso é invisível, mas em CUDA é o RuntimeError que "
+    f"derrubou o worker em 19/10"
+)
 
-    @staticmethod
-    def __new__(cls, *args, **kwargs):
-        return super().__new__(cls, *args, **kwargs)
+# A regra que o defeito violava: a pausa acompanha o pedaço, e não o padrão do torch.
+#
+# Sem GPU não há como construir um tensor em `cuda`, mas há como provar que `emendar()` LÊ o
+# dispositivo do pedaço: um pedaço em dtype diferente obriga a pausa a sair no MESMO dtype. Se
+# `emendar()` ignorasse o pedaço (o bug), a pausa sairia em float32 e a asserção falharia.
+pedaco_float64 = torch.ones(2400, dtype=torch.float64)
+emenda_mista = handler.emendar([pedaco_float64, pedaco_float64], 24000)
 
-    def reshape(self, *args, **kwargs):
-        return self
-
-    def to(self, *args, **kwargs):
-        return self
-
-
-falso = PedacoEmOutroDispositivo(2400)
-assert falso.device != torch.zeros(1).device, "o tensor tem de parecer de outro dispositivo"
-
-# A pausa precisa sair no dispositivo do PEDAÇO, e não no padrão do torch.
-try:
-    resultado = handler.emendar([falso, falso], 24000)
-    assert resultado.shape[-1] == 2400 * 2 + int(24000 * handler.PAUSA_ENTRE_TRECHOS_S), resultado.shape
-except RuntimeError as erro:
-    raise AssertionError(
-        "emendar() misturou dispositivos — é o defeito que derrubou o worker em 19/10: " + str(erro)
-    ) from erro
+assert emenda_mista.dtype == torch.float64, (
+    f"a pausa saiu em {emenda_mista.dtype} e os pedaços em float64: emendar() não está lendo o "
+    "dispositivo/dtype do pedaço — é exatamente o defeito de 19/10"
+)
 
 print(f"ok · fatiamento: {len(trechos)} trechos de {[len(t) for t in trechos]} caracteres")
-print("ok · emenda: a pausa acompanha o dispositivo dos pedaços (falha de CUDA não passa mais)")
+print("ok · emenda: a pausa acompanha o dispositivo e o dtype dos pedaços")
 
 # ─── A voz de verdade ────────────────────────────────────────────────────────
 saida = handler.falar({"prompt": "Bom dia! Teste do worker de voz.", "language_id": "pt"})
