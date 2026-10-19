@@ -136,10 +136,39 @@ assert emenda_mista.dtype == torch.float64, (
     "dispositivo/dtype do pedaço — é exatamente o defeito de 19/10"
 )
 
+"""
+─── A FORMA do tensor: 2-D, com o eixo de canal ───────────────────────────────
+
+Segundo defeito que foi para produção em 19/10/2026, e este derrubou a síntese de TODO texto fatiado:
+
+    Failed to create input filter:
+      "time_base=1/24000:sample_rate=24000:sample_fmt=flt:channel_layout=0x0"
+      (Invalid argument)
+
+`channel_layout=0x0` significa "sem canais": `emendar()` fazia `reshape(-1)` em cada pedaço e
+devolvia um tensor **1-D**. O modelo entrega `[canais, amostras]`, e o `ta.save` precisa desse eixo
+para saber o que escrever.
+
+O caminho de texto CURTO não passava por `emendar()` — e era justamente ele que a síntese real do
+teste exercitava. Por isso o build ficava verde e a produção quebrava: o teste cobria o caminho que
+não tinha o bug.
+"""
+estereo = torch.ones(1, 2400)
+emenda_forma = handler.emendar([estereo, estereo], 24000)
+
+assert emenda_forma.dim() == 2, (
+    f"emendar() devolveu {emenda_forma.dim()}-D (shape {tuple(emenda_forma.shape)}): o ta.save falha "
+    "com 'channel_layout=0x0'. Tem de ser [canais, amostras]."
+)
+assert emenda_forma.shape[0] == 1, (
+    f"a emenda perdeu o eixo de canal: shape {tuple(emenda_forma.shape)}"
+)
+
 print(f"ok · fatiamento: {len(trechos)} trechos de {[len(t) for t in trechos]} caracteres")
 print("ok · emenda: a pausa acompanha o dispositivo e o dtype dos pedaços")
+print(f"ok · forma: {tuple(emenda_forma.shape)} (2-D, com canal — o ta.save grava)")
 
-# ─── A voz de verdade ────────────────────────────────────────────────────────
+# ─── A voz de verdade: TEXTO CURTO ──────────────────────────────────────────
 saida = handler.falar({"prompt": "Bom dia! Teste do worker de voz.", "language_id": "pt"})
 
 assert saida.get("audio_base64"), saida
@@ -153,4 +182,49 @@ print(
     f"ok · {saida['segundos']}s de fala · {saida['bytes']} bytes · "
     f"idioma {saida['language_id']} · {saida['sample_rate']} Hz · "
     f"{saida['trechos']} trecho(s)"
+)
+
+"""
+─── A voz de verdade: TEXTO LONGO (o caminho que quebrou em produção) ─────────
+
+Este teste é o que faltava, e é o mais importante do arquivo.
+
+Em 19/10/2026 o worker passou a subir e pegar trabalho, mas **toda síntese de texto fatiado
+falhava** com `channel_layout=0x0`. O build ficava VERDE porque o único teste de voz sintetizava
+duas palavras — `trechos == 1`, o caminho que NÃO passa pelo `emendar()`.
+
+A lição: um teste de fumaça que exercita só o caminho fácil declara saudável o que nunca foi
+testado. Aqui o texto é longo de propósito (>2× `LIMITE_POR_TRECHO`), para obrigar o fatiamento, a
+emenda e a gravação do arquivo emendado.
+"""
+texto_longo_de_verdade = (
+    "Cobrança preventiva não é cobrar antes: é avisar antes. "
+    "O combinado precisa estar no contrato e no boleto, com prazo e custos previstos claros, "
+    "para o cliente saber o que esperar. "
+    "Mensagens automáticas por WhatsApp e e-mail lembrando quantos dias faltam reduzem surpresas "
+    "e incentivam o pagamento no prazo. "
+    "Quer aplicar esse método na sua empresa ou contar com a Profit para operacionalizar cada "
+    "etapa. E se o cliente continuar inadimplente, pode chamar a gente."
+)
+
+assert len(handler.dividir_em_frases(texto_longo_de_verdade)) > 1, (
+    "o texto do teste tem de ser fatiado, senão ele não exercita o emendar()"
+)
+
+longa = handler.falar({"prompt": texto_longo_de_verdade, "language_id": "pt"})
+
+assert longa.get("audio_base64"), longa
+assert longa["trechos"] > 1, (
+    f"o worker devolveu {longa.get('trechos')} trecho(s): o texto longo não foi fatiado, e o "
+    "caminho do emendar() não foi exercitado"
+)
+assert longa["segundos"] > saida["segundos"], (
+    f"o texto longo rendeu {longa['segundos']}s e o curto {saida['segundos']}s — a emenda "
+    "não está somando os trechos"
+)
+assert longa["bytes"] > 10_000, longa
+
+print(
+    f"ok · TEXTO LONGO: {longa['trechos']} trechos emendados · {longa['segundos']}s · "
+    f"{longa['bytes']} bytes · o ta.save gravou o áudio emendado"
 )

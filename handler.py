@@ -193,15 +193,37 @@ def emendar(pedacos, taxa):
 
     ## A regra
 
-    A pausa nasce no dispositivo do PRIMEIRO pedaco — nunca no padrão do `torch`. É o pedaço que
-    sabe onde o modelo está rodando.
+    ## A FORMA do tensor, e o erro que ela causou (19/10/2026)
+
+    O modelo devolve o áudio em **2-D** — `[canais, amostras]`, com 1 canal. A primeira versão desta
+    função fazia `reshape(-1)` em cada pedaço para "achatar", e o `torch.cat` devolvia **1-D**. O
+    `torchaudio.save` então falhava em produção:
+
+        Failed to create input filter:
+          "time_base=1/24000:sample_rate=24000:sample_fmt=flt:channel_layout=0x0"
+          (Invalid argument)
+
+    `channel_layout=0x0` é o sintoma: sem eixo de canal, o torchaudio não sabe quantos canais
+    escrever. Em CPU o erro é o mesmo — mas o caminho de texto CURTO nunca passa por aqui, e era ele
+    que os testes exercitavam com a síntese real.
+
+    ## A regra
+
+    A emenda acontece no **último eixo** (o das amostras) e a forma é a do primeiro pedaço — com
+    `reshape` só como rede de segurança para o caso de o modelo devolver 1-D. Um `torch.zeros` com
+    `shape=(1, n)` e não `(n,)`.
     """
     if len(pedacos) == 1:
         return pedacos[0]
 
-    primeiro = pedacos[0].reshape(-1)
+    # A forma de referência: `[canais, amostras]`. O modelo entrega assim; se um dia entregar 1-D, o
+    # `reshape(1, -1)` mantém a emenda funcionando em vez de estourar.
+    primeiro = pedacos[0]
+    forma = primeiro.shape if primeiro.dim() == 2 else (1, primeiro.shape[-1])
+    canais = forma[0]
+
     silencio = torch.zeros(
-        int(taxa * PAUSA_ENTRE_TRECHOS_S),
+        (canais, int(taxa * PAUSA_ENTRE_TRECHOS_S)),
         dtype=primeiro.dtype,
         device=primeiro.device,
     )
@@ -212,11 +234,13 @@ def emendar(pedacos, taxa):
         if indice:
             partes.append(silencio)
 
-        # `to(primeiro.device)` é rede de segurança: um modelo que devolva trechos em dispositivos
-        # diferentes (não deveria, mas) não pode derrubar a emenda inteira.
-        partes.append(pedaco.reshape(-1).to(primeiro.device))
+        # `reshape(canais, -1)` garante a MESMA forma do primeiro, e `to(device)` é rede de segurança:
+        # um modelo que devolva trechos em dispositivos diferentes não pode derrubar a emenda.
+        partes.append(
+            pedaco.reshape(canais, -1).to(primeiro.device, dtype=primeiro.dtype)
+        )
 
-    return torch.cat(partes)
+    return torch.cat(partes, dim=-1)
 
 
 def modelo():
