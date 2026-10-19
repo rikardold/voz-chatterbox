@@ -59,7 +59,54 @@ assert handler.emendar([um], 24000).shape[-1] == 2400
 dois = handler.emendar([um, um], 24000)
 assert dois.shape[-1] == 2400 * 2 + int(24000 * handler.PAUSA_ENTRE_TRECHOS_S), dois.shape
 
+"""
+─── O TESTE QUE FALTAVA: a pausa nasce no MESMO dispositivo dos pedaços ───────
+
+Este teste existe por um defeito que FOI PARA PRODUÇÃO em 19/10/2026.
+
+`emendar()` criava a pausa com `torch.zeros(...)`, que aloca na CPU. Em GPU, o `torch.cat` de CPU
+com CUDA levanta `RuntimeError: Expected all tensors to be on the same device` — e o worker morria
+no boot. O endpoint subia "3 workers prontos, 0 rodando", a fila não drenava e o contador de
+`completed` ficava congelado. Nenhum áudio saía.
+
+**E o teste de fumaça passou**, porque ele roda com `DISPOSITIVO=cpu`: em CPU a pausa e os pedaços
+estão no mesmo lugar, e o `cat` funciona. O teste que existe para pegar falha de build estava cego
+para falha de DISPOSITIVO.
+
+Aqui não há GPU no runner, então o teste simula: um tensor "de mentira" cujo `.device` não é o
+padrão do `torch`. Se `emendar()` não respeitar o dispositivo do pedaço, a asserção falha ANTES de a
+imagem entrar no ar.
+"""
+
+
+class PedacoEmOutroDispositivo(torch.Tensor):
+    """Um tensor como se viesse da GPU: `reshape` e `to` preservam um dispositivo diferente do padrão."""
+
+    @staticmethod
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, *args, **kwargs)
+
+    def reshape(self, *args, **kwargs):
+        return self
+
+    def to(self, *args, **kwargs):
+        return self
+
+
+falso = PedacoEmOutroDispositivo(2400)
+assert falso.device != torch.zeros(1).device, "o tensor tem de parecer de outro dispositivo"
+
+# A pausa precisa sair no dispositivo do PEDAÇO, e não no padrão do torch.
+try:
+    resultado = handler.emendar([falso, falso], 24000)
+    assert resultado.shape[-1] == 2400 * 2 + int(24000 * handler.PAUSA_ENTRE_TRECHOS_S), resultado.shape
+except RuntimeError as erro:
+    raise AssertionError(
+        "emendar() misturou dispositivos — é o defeito que derrubou o worker em 19/10: " + str(erro)
+    ) from erro
+
 print(f"ok · fatiamento: {len(trechos)} trechos de {[len(t) for t in trechos]} caracteres")
+print("ok · emenda: a pausa acompanha o dispositivo dos pedaços (falha de CUDA não passa mais)")
 
 # ─── A voz de verdade ────────────────────────────────────────────────────────
 saida = handler.falar({"prompt": "Bom dia! Teste do worker de voz.", "language_id": "pt"})

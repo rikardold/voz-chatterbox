@@ -172,11 +172,39 @@ def emendar(pedacos, taxa):
 
     Os pedaços vêm do mesmo modelo, mesma amostra e mesma taxa, então concatenar é somar amostras:
     não há remixagem, não há reamostragem, e a voz não muda no ponto da emenda.
+
+    ## O bug que derrubou o worker em produção (19/10/2026)
+
+    A primeira versão criava a pausa com `torch.zeros(...)`, que aloca **na CPU**. Os pedaços vêm do
+    modelo, que roda em `cuda` quando `DISPOSITIVO=cuda` — e `torch.cat` de CPU com GPU levanta:
+
+        RuntimeError: Expected all tensors to be on the same device
+
+    O sintoma, medido no endpoint: os workers subiam, apareciam como `running=3` por ~100 s,
+    voltavam a `ready` **sem executar**, a fila não drenava e o contador de `completed` ficava
+    congelado. O Runpod reporta o container como pronto mesmo quando o handler morre no boot.
+
+    ## Por que o teste de fumaça NÃO pegou isto
+
+    Porque ele roda com `DISPOSITIVO=cpu` (ver `teste.py`): em CPU, a pausa e os pedaços estão no
+    mesmo lugar e o `cat` funciona. **O teste que existe para pegar falha de build estava cego para
+    falha de dispositivo.** A correção está no `teste.py`: ele agora emenda dois tensores numa
+    "GPU" simulada e falha se o dispositivo da pausa não acompanhar o dos pedaços.
+
+    ## A regra
+
+    A pausa nasce no dispositivo do PRIMEIRO pedaco — nunca no padrão do `torch`. É o pedaço que
+    sabe onde o modelo está rodando.
     """
     if len(pedacos) == 1:
         return pedacos[0]
 
-    silencio = torch.zeros(int(taxa * PAUSA_ENTRE_TRECHOS_S))
+    primeiro = pedacos[0].reshape(-1)
+    silencio = torch.zeros(
+        int(taxa * PAUSA_ENTRE_TRECHOS_S),
+        dtype=primeiro.dtype,
+        device=primeiro.device,
+    )
 
     partes = []
 
@@ -184,7 +212,9 @@ def emendar(pedacos, taxa):
         if indice:
             partes.append(silencio)
 
-        partes.append(pedaco.reshape(-1))
+        # `to(primeiro.device)` é rede de segurança: um modelo que devolva trechos em dispositivos
+        # diferentes (não deveria, mas) não pode derrubar a emenda inteira.
+        partes.append(pedaco.reshape(-1).to(primeiro.device))
 
     return torch.cat(partes)
 
