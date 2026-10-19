@@ -40,15 +40,10 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt ./
-# `--no-deps` no chatterbox NÃO serve: ele precisa das próprias dependências (transformers, etc.). O que
-# protege o torch é a constraint abaixo, e por um motivo concreto:
-#
-# o `chatterbox-tts` declara `torch==2.6.0` no pyproject. Com a base em 2.8.0, o pip veria o conflito e
-# REBAIXARIA o torch para 2.6.0 — voltando exatamente ao `sm_120` incompatível que derrubou o worker.
-# A constraint fixa o torch da BASE como intocável: se o resolver não conseguir honrar as duas coisas,
-# o build fica VERMELHO no CI (onde é barato) em vez de o worker morrer na GPU (onde é caro).
-COPY restricoes.txt ./
-RUN pip install --no-cache-dir -c restricoes.txt -r requirements.txt
+# As dependências vêm do `requirements.txt`, que instala `chatterbox-tts --no-deps` e lista à mão o
+# que ele usa. O torch NÃO é instalado aqui: ele vem da imagem base (2.8 + CUDA 12.8), e é o único
+# que tem kernel para sm_120 (Blackwell). Ver o bloco explicativo no próprio requirements.txt.
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Conferência barata da pilha, ANTES do download pesado dos pesos: uma versão trocada pelo pip não
 # pode custar 20 minutos de build para aparecer. As versões impressas aqui são também a evidência de

@@ -1,5 +1,49 @@
+####
+# ⚠️ LEIA ANTES DE MEXER: por que `--no-deps` no chatterbox
+#
+# O `chatterbox-tts` 0.1.7 declara:
+#
+#     torch==2.6.0   ; python_version < "3.14"
+#     torch>=2.9.0   ; python_version >= "3.14"
+#
+# O pin do 2.6 vale para as imagens oficiais (Python 3.11/3.12). E o torch 2.6 **não tem kernel
+# para sm_120** — a GPU Blackwell que o Runpod passou a alocar em 19/10/2026. O worker morria no boot:
+#
+#     NVIDIA RTX PRO 6000 Blackwell ... capability sm_120 is not compatible
+#     RuntimeError: CUDA initialization failed: no kernel image is available
+#     Worker is unhealthy, exiting.
+#
+# Instalar o pacote normalmente força o downgrade do torch e desfaz a correção em silêncio. Fixar
+# `torch==2.8` via constraint (a primeira tentativa) torna a resolução IMPOSSÍVEL — o pip recusa com
+# `ResolutionImpossible`, e está certo: o pin do pacote e a constraint não podem coexistir.
+#
+# A saída é instalar `chatterbox-tts --no-deps` e listar AQUI as dependências que ele realmente usa.
+# O torch fica sendo o da IMAGEM BASE (2.8 + CUDA 12.8, que compila para sm_120 e mantém sm_50..sm_90
+# — as GPUs antigas continuam servidas). O pacote não usa nada exclusivo do 2.6: o pin é
+# conservadorismo do autor, e o CI confere que o import do Llama e a síntese continuam funcionando.
+#
+# Se o `chatterbox-tts` subir de versão, confira a lista abaixo contra `requires_dist` do PyPI.
+####
+
 # O modelo oficial (Resemble AI). Traz o Chatterbox Multilingual, que cobre português.
-chatterbox-tts
+# `--no-deps` porque o pin de torch dele é anterior à GPU Blackwell (ver o bloco acima).
+chatterbox-tts==0.1.7 --no-deps
+
+# ─── As dependências que o `--no-deps` deixou de fora (de `requires_dist` 0.1.7) ───
+# O torch NÃO está aqui de propósito: ele vem da imagem base, e é ele que suporta sm_120.
+librosa==0.11.0
+s3tokenizer
+transformers==5.2.0
+diffusers==0.29.0
+resemble-perth>=1.0.0
+conformer==0.3.2
+safetensors==0.5.3
+spacy-pkuseg
+pykakasi==2.3.0
+pyloudnorm
+omegaconf
+# `gradio` NÃO entra: ele só serve para a interface web que o pacote traz, e este worker é
+# serverless (recebe `input`, devolve JSON). Instalá-lo somaria centenas de MB à imagem.
 
 # O SDK do RunPod fica sem versão fixa DE PROPÓSITO, mas por um motivo específico: aqui usamos
 # apenas `runpod.serverless.start`. Nenhum utilitário interno — foi um deles (`upload_output`) que
@@ -9,3 +53,4 @@ runpod
 
 # Escrita do wav em memória (o áudio sai como base64 na resposta, sem passar por disco).
 soundfile
+
